@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick fonts-noto-cjk
+          ffmpeg -version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile Python files
+        run: |
+          python -m compileall .
+
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          from src.beat_detect import get_audio_duration, detect_beats
+          from src.subtitle import load_srt, find_subtitle_at
+          from src.effects import beat_scale, shake_offset, flash_opacity
+          from src.renderer import RenderConfig
+          from src.batch import load_tasks
+          print("All core modules imported successfully.")
+          PY
