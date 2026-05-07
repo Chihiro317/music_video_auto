@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.DS_Store
+Thumbs.db
+output/*.mp4
+output/*.mov
+input/music/*
+input/characters/*
+input/lyrics/*
+input/backgrounds/*
+!input/music/.gitkeep
+!input/characters/.gitkeep
+!input/lyrics/.gitkeep
+!input/backgrounds/.gitkeep
