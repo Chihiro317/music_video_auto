@@ -45,3 +45,7 @@ jobs:
           from src.batch import load_tasks
           print("All core modules imported successfully.")
           PY
+
+      - name: Run pytest
+        run: |
+          pytest -q
