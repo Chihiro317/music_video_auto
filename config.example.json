@@ -1,0 +1,17 @@
+{
+  "tasks": [
+    {
+      "music": "input/music/demo.mp3",
+      "character": "input/characters/role.png",
+      "lyrics": "input/lyrics/demo.srt",
+      "background": "input/backgrounds/bg.mp4",
+      "title": "歌曲名",
+      "version": "卡点版",
+      "account": "你的账号",
+      "output": "output/demo.mp4",
+      "width": 1080,
+      "height": 1920,
+      "fps": 30
+    }
+  ]
+}
