@@ -1,0 +1,76 @@
+name: Generate Original Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      width:
+        description: "Output video width"
+        required: true
+        default: "540"
+      height:
+        description: "Output video height"
+        required: true
+        default: "960"
+      duration:
+        description: "Background duration in seconds"
+        required: true
+        default: "8"
+      fps:
+        description: "Frames per second"
+        required: true
+        default: "24"
+      petals:
+        description: "Number of original petal PNGs"
+        required: true
+        default: "40"
+      bokeh:
+        description: "Number of original bokeh PNGs"
+        required: true
+        default: "16"
+
+jobs:
+  generate-assets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+          ffmpeg -version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate original sakura assets
+        run: |
+          python scripts/generate_original_assets.py \
+            --root assets/generated \
+            --petals ${{ github.event.inputs.petals }} \
+            --bokeh ${{ github.event.inputs.bokeh }} \
+            --background \
+            --width ${{ github.event.inputs.width }} \
+            --height ${{ github.event.inputs.height }} \
+            --duration ${{ github.event.inputs.duration }} \
+            --fps ${{ github.event.inputs.fps }}
+
+      - name: List generated files
+        run: |
+          find assets/generated -maxdepth 3 -type f | sort
+
+      - name: Upload generated asset pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-sakura-assets
+          path: assets/generated
+          if-no-files-found: error
