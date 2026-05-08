@@ -8,7 +8,34 @@ from moviepy.editor import VideoClip
 from PIL import Image, ImageDraw, ImageFilter
 
 from .effects import beat_scale, flash_opacity, shake_offset
-from .renderer import _pil_character_image, _pil_cover_image
+
+
+def _resample_filter():
+    if hasattr(Image, "Resampling"):
+        return Image.Resampling.LANCZOS
+    return Image.LANCZOS if hasattr(Image, "LANCZOS") else Image.BICUBIC
+
+
+def _pil_cover_image(path: str | Path, size: tuple[int, int]) -> Image.Image:
+    width, height = size
+    image = Image.open(path).convert("RGB")
+    src_w, src_h = image.size
+    scale = max(width / src_w, height / src_h)
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    image = image.resize((new_w, new_h), _resample_filter())
+    left = max(0, (new_w - width) // 2)
+    top = max(0, (new_h - height) // 2)
+    return image.crop((left, top, left + width, top + height))
+
+
+def _pil_character_image(path: str | Path, target_height: int) -> Image.Image:
+    image = Image.open(path).convert("RGBA")
+    src_w, src_h = image.size
+    scale = target_height / src_h
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    return image.resize((new_w, new_h), _resample_filter())
 
 
 def _make_default_background(size: tuple[int, int]) -> Image.Image:
@@ -35,7 +62,6 @@ def _light_overlay(size: tuple[int, int], t: float) -> Image.Image:
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Vertical neon streaks.
     spacing = max(36, width // 9)
     shift = int((t * 75) % spacing)
     for x in range(-spacing, width + spacing, spacing):
@@ -44,7 +70,6 @@ def _light_overlay(size: tuple[int, int], t: float) -> Image.Image:
         draw.line((xx, 0, xx + int(width * 0.08), height), fill=(140, 96, 255, max(20, alpha)), width=3)
         draw.line((xx + 4, 0, xx + int(width * 0.08) + 4, height), fill=(80, 190, 255, 22), width=1)
 
-    # Radial glow around the character zone.
     glow = Image.new("RGBA", size, (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     cx = width // 2 + int(20 * math.sin(t * 1.4))
@@ -60,15 +85,12 @@ def _light_overlay(size: tuple[int, int], t: float) -> Image.Image:
 
 
 def _paste_with_shadow(base: Image.Image, character: Image.Image, x: int, y: int) -> None:
-    """Paste character with a soft purple glow/shadow."""
-    shadow = Image.new("RGBA", character.size, (0, 0, 0, 0))
     if character.mode != "RGBA":
         character = character.convert("RGBA")
     alpha = character.getchannel("A")
     glow = Image.new("RGBA", character.size, (120, 70, 255, 120))
     glow.putalpha(alpha.filter(ImageFilter.GaussianBlur(radius=12)))
-    shadow.alpha_composite(glow)
-    base.alpha_composite(shadow, (x, y))
+    base.alpha_composite(glow, (x, y))
     base.alpha_composite(character, (x, y))
 
 
@@ -79,25 +101,25 @@ def make_animated_main_visual(
     beats: list[float],
     size: tuple[int, int],
 ) -> VideoClip:
-    """Create the animated main visual layer as frame-by-frame PIL images.
+    """Create an animated main visual layer frame-by-frame.
 
-    This avoids MoviePy callable resize/position effects while still allowing
-    beat-driven scale, shake, flash, glow, and moving background light streaks.
+    This avoids MoviePy callable resize/position effects while allowing beat-driven
+    scale, shake, flash, glow, and moving background light streaks.
     """
     width, height = size
     bg = _background_image(background_path, size)
     base_character_height = int(height * 0.56)
     character_base = _pil_character_image(character_path, target_height=base_character_height)
+    resample = _resample_filter()
 
     def make_frame(t: float) -> np.ndarray:
         frame = bg.copy().convert("RGBA")
         frame.alpha_composite(_light_overlay(size, t))
 
-        # Beat pulse and small idle breathing.
         scale = beat_scale(t, beats, base=1.0, pulse=0.12, decay=0.22)
         target_h = max(1, int(character_base.height * scale))
         target_w = max(1, int(character_base.width * scale))
-        char = character_base.resize((target_w, target_h), Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.BICUBIC)
+        char = character_base.resize((target_w, target_h), resample)
 
         sx, sy = shake_offset(t, beats, amount=max(4, width // 45))
         x = int(width / 2 - target_w / 2 + sx)
