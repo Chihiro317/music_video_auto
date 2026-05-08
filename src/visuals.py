@@ -112,7 +112,7 @@ def _background_image(background_path: str | None, size: tuple[int, int]) -> Ima
 
 
 def _draw_realistic_petal(draw: ImageDraw.ImageDraw, x: float, y: float, size: float, angle: float, alpha: int, tone: int = 0) -> None:
-    """Draw a restrained, soft petal suitable for a cinematic black background."""
+    """Draw a soft loose petal."""
     r = max(3, float(size))
     ca, sa = math.cos(angle), math.sin(angle)
     raw = [
@@ -126,11 +126,11 @@ def _draw_realistic_petal(draw: ImageDraw.ImageDraw, x: float, y: float, size: f
         ry = y + (px * sa + py * ca) * r
         pts.append((rx, ry))
     if tone == 1:
-        fill = (245, 205, 230, alpha)
-        edge = (255, 240, 250, min(255, alpha + 22))
+        fill = (248, 210, 232, alpha)
+        edge = (255, 242, 250, min(255, alpha + 22))
     else:
-        fill = (230, 150, 205, alpha)
-        edge = (255, 218, 238, min(255, alpha + 18))
+        fill = (232, 150, 205, alpha)
+        edge = (255, 220, 240, min(255, alpha + 18))
     draw.polygon(pts, fill=fill)
     draw.line(pts + [pts[0]], fill=edge, width=max(1, int(r * 0.07)))
     x1 = x - math.sin(angle) * r * 0.62
@@ -140,35 +140,59 @@ def _draw_realistic_petal(draw: ImageDraw.ImageDraw, x: float, y: float, size: f
     draw.line((x1, y1, x2, y2), fill=(255, 245, 250, max(16, alpha // 4)), width=1)
 
 
-def _petal_layer(size: tuple[int, int], t: float, layer: str, beat: float = 0.0) -> Image.Image:
-    """Slow rising petals with visible depth and beat-reactive parallax."""
+def _draw_sakura_blossom(draw: ImageDraw.ImageDraw, x: float, y: float, size: float, angle: float, alpha: int) -> None:
+    """Draw a small five-petal sakura blossom mixed with loose petals."""
+    r = max(4, float(size))
+    center_color = (255, 230, 110, min(255, alpha + 20))
+    for k in range(5):
+        a = angle + k * math.tau / 5
+        px = x + math.cos(a) * r * 0.42
+        py = y + math.sin(a) * r * 0.42
+        petal_angle = a + math.pi / 2
+        ca, sa = math.cos(petal_angle), math.sin(petal_angle)
+        raw = [(0, -1.05), (0.45, -0.25), (0.34, 0.72), (0, 0.95), (-0.34, 0.72), (-0.45, -0.25)]
+        pts = []
+        for rx0, ry0 in raw:
+            rx = px + (rx0 * ca - ry0 * sa) * r * 0.55
+            ry = py + (rx0 * sa + ry0 * ca) * r * 0.55
+            pts.append((rx, ry))
+        draw.polygon(pts, fill=(255, 188, 226, alpha), outline=(255, 232, 246, min(255, alpha + 15)))
+    draw.ellipse((x - r * 0.13, y - r * 0.13, x + r * 0.13, y + r * 0.13), fill=center_color)
+
+
+def _floral_layer(size: tuple[int, int], t: float, layer: str, beat: float = 0.0) -> Image.Image:
+    """Slow rising sakura blossoms and petals with strong foreground/background depth."""
     width, height = size
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+
     if layer == "far":
-        count, speed, base_size, blur, alpha_base, drift_scale = 34, 0.023, height * 0.010, 0.8, 54, 0.018
+        count, speed, base_size, blur, alpha_base, drift_scale, blossom_ratio = 58, 0.020, height * 0.008, 1.0, 46, 0.018, 0.28
     elif layer == "mid":
-        count, speed, base_size, blur, alpha_base, drift_scale = 24, 0.035, height * 0.019, 1.1, 92, 0.032
+        count, speed, base_size, blur, alpha_base, drift_scale, blossom_ratio = 42, 0.032, height * 0.017, 1.4, 84, 0.034, 0.34
     elif layer == "near":
-        count, speed, base_size, blur, alpha_base, drift_scale = 13, 0.046, height * 0.050, 5.4, 128, 0.060
-    else:  # ultra foreground, very blurred, creates depth without clutter
-        count, speed, base_size, blur, alpha_base, drift_scale = 5, 0.055, height * 0.095, 9.0, 82, 0.090
+        count, speed, base_size, blur, alpha_base, drift_scale, blossom_ratio = 24, 0.045, height * 0.043, 5.2, 125, 0.065, 0.22
+    else:
+        count, speed, base_size, blur, alpha_base, drift_scale, blossom_ratio = 10, 0.054, height * 0.085, 10.0, 90, 0.100, 0.16
 
     for i in range(count):
         seed = i * 101.37 + {"far": 0, "mid": 500, "near": 1000}.get(layer, 1500)
         progress = (t * speed + (i * 0.61803398875)) % 1.0
         x_base = (math.sin(seed) * 0.5 + 0.5) * width
-        drift = math.sin(t * (0.22 + i * 0.002) + seed) * width * drift_scale
-        # beat expands petals outward from center for visible background scaling
-        expand = beat * width * (0.012 if layer == "far" else 0.024 if layer == "mid" else 0.045)
+        drift = math.sin(t * (0.24 + i * 0.002) + seed) * width * drift_scale
+        expand = beat * width * (0.016 if layer == "far" else 0.032 if layer == "mid" else 0.060)
         side = -1 if x_base < width / 2 else 1
         x = x_base + drift + side * expand
-        y = height + base_size * 7 - progress * (height + base_size * 14) - beat * height * (0.010 if layer == "far" else 0.022 if layer == "mid" else 0.040)
-        angle = seed * 0.08 + t * (0.22 + i * 0.002) + beat * 0.20
-        size_factor = 0.72 + 0.42 * (math.sin(seed * 0.07) * 0.5 + 0.5)
-        petal_size = base_size * size_factor * (1.0 + beat * (0.10 if layer == "far" else 0.18 if layer == "mid" else 0.26))
-        alpha = int(alpha_base * (0.48 + 0.52 * math.sin(progress * math.pi)) * (1.0 + beat * 0.20))
-        _draw_realistic_petal(draw, x, y, petal_size, angle, min(alpha, 220), tone=i % 2)
+        y = height + base_size * 7 - progress * (height + base_size * 14) - beat * height * (0.014 if layer == "far" else 0.030 if layer == "mid" else 0.052)
+        angle = seed * 0.08 + t * (0.25 + i * 0.002) + beat * 0.24
+        size_factor = 0.70 + 0.50 * (math.sin(seed * 0.07) * 0.5 + 0.5)
+        item_size = base_size * size_factor * (1.0 + beat * (0.12 if layer == "far" else 0.22 if layer == "mid" else 0.34))
+        alpha = int(alpha_base * (0.48 + 0.52 * math.sin(progress * math.pi)) * (1.0 + beat * 0.22))
+        use_blossom = (abs(math.sin(seed * 0.13)) < blossom_ratio)
+        if use_blossom:
+            _draw_sakura_blossom(draw, x, y, item_size * 1.15, angle, min(alpha, 210))
+        else:
+            _draw_realistic_petal(draw, x, y, item_size, angle, min(alpha, 220), tone=i % 2)
 
     if blur > 0:
         overlay = overlay.filter(ImageFilter.GaussianBlur(radius=blur))
@@ -183,10 +207,10 @@ def _speed_line_overlay(size: tuple[int, int], t: float, beats: list[float]) -> 
     boost = _beat_strength(t, beats, duration=0.16)
     if boost <= 0.01:
         return overlay
-    for i in range(38):
-        angle = (i / 38) * math.tau + 0.03 * math.sin(t)
-        inner = min(width, height) * (0.16 + 0.03 * boost)
-        outer = max(width, height) * (0.48 + 0.18 * ((i % 5) / 5) + 0.08 * boost)
+    for i in range(42):
+        angle = (i / 42) * math.tau + 0.03 * math.sin(t)
+        inner = min(width, height) * (0.15 + 0.03 * boost)
+        outer = max(width, height) * (0.50 + 0.20 * ((i % 5) / 5) + 0.09 * boost)
         x1 = cx + math.cos(angle) * inner
         y1 = cy + math.sin(angle) * inner * 0.58
         x2 = cx + math.cos(angle) * outer
@@ -210,22 +234,21 @@ def _background_effects(size: tuple[int, int], t: float, beats: list[float]) -> 
         gd.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(150, 42, 118, alpha))
     overlay.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=26)))
     overlay.alpha_composite(_speed_line_overlay(size, t, beats))
-    overlay.alpha_composite(_petal_layer(size, t, "far", beat))
-    overlay.alpha_composite(_petal_layer(size, t, "mid", beat))
-    # Zoom the entire background FX layer on beat so petals visibly scale with the music.
-    overlay = _zoom_rgba_layer(overlay, 1.0 + 0.055 * beat)
+    overlay.alpha_composite(_floral_layer(size, t, "far", beat))
+    overlay.alpha_composite(_floral_layer(size, t, "mid", beat))
+    overlay = _zoom_rgba_layer(overlay, 1.0 + 0.065 * beat)
     flash = flash_opacity(t, beats, duration=0.10)
     if flash > 0:
         overlay.alpha_composite(Image.new("RGBA", size, (255, 220, 245, int(58 * flash))))
     return overlay
 
 
-def _foreground_petal_effects(size: tuple[int, int], t: float, beats: list[float]) -> Image.Image:
+def _foreground_floral_effects(size: tuple[int, int], t: float, beats: list[float]) -> Image.Image:
     beat = _beat_strength(t, beats, duration=0.18)
     layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    layer.alpha_composite(_petal_layer(size, t, "near", beat))
-    layer.alpha_composite(_petal_layer(size, t, "front", beat))
-    return _zoom_rgba_layer(layer, 1.0 + 0.035 * beat)
+    layer.alpha_composite(_floral_layer(size, t, "near", beat))
+    layer.alpha_composite(_floral_layer(size, t, "front", beat))
+    return _zoom_rgba_layer(layer, 1.0 + 0.045 * beat)
 
 
 def _paste_with_shadow(base: Image.Image, character: Image.Image, x: int, y: int, strength: int = 105) -> None:
@@ -271,9 +294,10 @@ def make_animated_main_visual(
     """Horizontal cinematic visual layer.
 
     - black cinematic base
-    - slow rising petals with far/mid/near/front depth
-    - near/front petals are intentionally blurred
-    - background and petals scale on beat
+    - slow rising petals plus full sakura blossoms
+    - far/mid/near/front depth layers
+    - near/front layers are intentionally blurred
+    - background and floral layers scale on beat
     - character slows briefly and jumps on every beat
     """
     width, height = size
@@ -284,7 +308,7 @@ def make_animated_main_visual(
 
     def make_frame(t: float) -> np.ndarray:
         beat = _beat_strength(t, beats, duration=0.20)
-        bg_zoom = 1.0 + 0.070 * beat
+        bg_zoom = 1.0 + 0.078 * beat
         if background_path and Path(background_path).exists() and Path(background_path).suffix.lower() not in VIDEO_SUFFIXES:
             bg = _pil_cover_image(background_path, size, zoom=bg_zoom).convert("RGBA")
             bg = Image.blend(Image.new("RGBA", size, (0, 0, 0, 255)), bg, 0.30)
@@ -310,7 +334,7 @@ def make_animated_main_visual(
         y = int(height * 0.54 - target_h / 2 + jump)
         _paste_with_shadow(frame, char, x, y, strength=105)
 
-        frame.alpha_composite(_foreground_petal_effects(size, t, beats))
+        frame.alpha_composite(_foreground_floral_effects(size, t, beats))
         return np.array(frame.convert("RGB"))
 
     return VideoClip(make_frame=make_frame, duration=duration)
