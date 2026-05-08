@@ -96,9 +96,9 @@ def _motion_blur(layer: Image.Image, beat: float) -> Image.Image:
     base = layer.convert("RGBA")
     out = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     out.alpha_composite(base)
-    for k, alpha_mul in enumerate((0.38, 0.25, 0.16), start=1):
-        z = 1.0 + beat * (0.030 + k * 0.030)
-        ghost = _zoom_rgba_layer(base, z).filter(ImageFilter.GaussianBlur(radius=beat * (1.3 + k * 1.2)))
+    for k, alpha_mul in enumerate((0.46, 0.32, 0.22, 0.14), start=1):
+        z = 1.0 + beat * (0.050 + k * 0.055)
+        ghost = _zoom_rgba_layer(base, z).filter(ImageFilter.GaussianBlur(radius=beat * (2.0 + k * 1.8)))
         a = ghost.getchannel("A").point(lambda v, m=alpha_mul: int(v * m))
         ghost.putalpha(a)
         out.alpha_composite(ghost)
@@ -259,16 +259,16 @@ def _background_effects(size: tuple[int, int], t: float, beats: list[float]) -> 
     gd = ImageDraw.Draw(glow)
     cx, cy = width // 2, height // 2
     for i in range(8):
-        rx = int(width * (0.16 + i * 0.055 + beat * 0.045))
-        ry = int(height * (0.22 + i * 0.065 + beat * 0.050))
-        alpha = max(0, 18 - i * 2) + int(23 * beat)
+        rx = int(width * (0.16 + i * 0.055 + beat * 0.060))
+        ry = int(height * (0.22 + i * 0.065 + beat * 0.070))
+        alpha = max(0, 18 - i * 2) + int(28 * beat)
         gd.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(170, 45, 140, alpha))
-    overlay.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=30 + beat * 8)))
+    overlay.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=30 + beat * 12)))
     overlay.alpha_composite(_star_layer(size, t, beat))
     overlay.alpha_composite(_speed_line_overlay(size, t, beats))
     overlay.alpha_composite(_floral_layer(size, t, "far", beat))
     overlay.alpha_composite(_floral_layer(size, t, "mid", beat))
-    overlay = _zoom_rgba_layer(overlay, 1.0 + 0.105 * beat)
+    overlay = _zoom_rgba_layer(overlay, 1.0 + 0.180 * beat)
     overlay = _motion_blur(overlay, beat)
     flash = flash_opacity(t, beats, duration=0.11)
     if flash > 0:
@@ -281,8 +281,8 @@ def _foreground_floral_effects(size: tuple[int, int], t: float, beats: list[floa
     layer = Image.new("RGBA", size, (0, 0, 0, 0))
     layer.alpha_composite(_floral_layer(size, t, "near", beat))
     layer.alpha_composite(_floral_layer(size, t, "front", beat))
-    layer = _zoom_rgba_layer(layer, 1.0 + 0.075 * beat)
-    return _motion_blur(layer, beat * 0.9)
+    layer = _zoom_rgba_layer(layer, 1.0 + 0.130 * beat)
+    return _motion_blur(layer, beat * 1.05)
 
 
 def _paste_with_shadow(base: Image.Image, character: Image.Image, x: int, y: int, strength: int = 120) -> None:
@@ -328,7 +328,7 @@ def make_animated_main_visual(
     """Horizontal anime music visual layer.
 
     Dense black-pink background similar to reference images: hearts, stars,
-    sakura blossoms and petals, strong beat zoom, and motion blur.
+    sakura blossoms and petals, stronger beat zoom, and motion blur.
     """
     width, height = size
     bg_base = _background_image(background_path, size)
@@ -338,7 +338,7 @@ def make_animated_main_visual(
 
     def make_frame(t: float) -> np.ndarray:
         beat = _beat_strength(t, beats, duration=0.22)
-        bg_zoom = 1.0 + 0.135 * beat
+        bg_zoom = 1.0 + 0.230 * beat
         if background_path and Path(background_path).exists() and Path(background_path).suffix.lower() not in VIDEO_SUFFIXES:
             bg = _pil_cover_image(background_path, size, zoom=bg_zoom).convert("RGBA")
             bg = Image.blend(Image.new("RGBA", size, (0, 0, 0, 255)), bg, 0.30)
@@ -349,7 +349,7 @@ def make_animated_main_visual(
             top = max(0, (zoomed.height - height) // 2)
             bg = zoomed.crop((left, top, left + width, top + height)).convert("RGBA")
             if beat > 0.05:
-                bg = bg.filter(ImageFilter.GaussianBlur(radius=beat * 2.2))
+                bg = bg.filter(ImageFilter.GaussianBlur(radius=beat * 4.0))
 
         frame = bg
         frame.alpha_composite(_background_effects(size, t, beats))
