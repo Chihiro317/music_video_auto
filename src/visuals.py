@@ -78,6 +78,18 @@ def _time_since_last_beat(t: float, beats: list[float]) -> float | None:
     return None if previous is None else t - previous
 
 
+def _zoom_rgba_layer(layer: Image.Image, zoom: float) -> Image.Image:
+    if zoom <= 1.001:
+        return layer
+    width, height = layer.size
+    resample = _resample_filter()
+    zw, zh = max(1, int(width * zoom)), max(1, int(height * zoom))
+    enlarged = layer.resize((zw, zh), resample)
+    left = max(0, (zw - width) // 2)
+    top = max(0, (zh - height) // 2)
+    return enlarged.crop((left, top, left + width, top + height))
+
+
 def _make_default_background(size: tuple[int, int]) -> Image.Image:
     """Horizontal cinematic black background with subtle red/purple vignette."""
     width, height = size
@@ -128,30 +140,35 @@ def _draw_realistic_petal(draw: ImageDraw.ImageDraw, x: float, y: float, size: f
     draw.line((x1, y1, x2, y2), fill=(255, 245, 250, max(16, alpha // 4)), width=1)
 
 
-def _petal_layer(size: tuple[int, int], t: float, layer: str) -> Image.Image:
-    """Slow rising petals with fewer elements and clearer depth for a premium look."""
+def _petal_layer(size: tuple[int, int], t: float, layer: str, beat: float = 0.0) -> Image.Image:
+    """Slow rising petals with visible depth and beat-reactive parallax."""
     width, height = size
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     if layer == "far":
-        count, speed, base_size, blur, alpha_base = 16, 0.020, height * 0.010, 0.7, 48
+        count, speed, base_size, blur, alpha_base, drift_scale = 34, 0.023, height * 0.010, 0.8, 54, 0.018
     elif layer == "mid":
-        count, speed, base_size, blur, alpha_base = 11, 0.030, height * 0.018, 1.1, 82
-    else:
-        count, speed, base_size, blur, alpha_base = 6, 0.040, height * 0.040, 5.0, 105
+        count, speed, base_size, blur, alpha_base, drift_scale = 24, 0.035, height * 0.019, 1.1, 92, 0.032
+    elif layer == "near":
+        count, speed, base_size, blur, alpha_base, drift_scale = 13, 0.046, height * 0.050, 5.4, 128, 0.060
+    else:  # ultra foreground, very blurred, creates depth without clutter
+        count, speed, base_size, blur, alpha_base, drift_scale = 5, 0.055, height * 0.095, 9.0, 82, 0.090
 
     for i in range(count):
-        seed = i * 101.37 + (0 if layer == "far" else 500 if layer == "mid" else 1000)
+        seed = i * 101.37 + {"far": 0, "mid": 500, "near": 1000}.get(layer, 1500)
         progress = (t * speed + (i * 0.61803398875)) % 1.0
         x_base = (math.sin(seed) * 0.5 + 0.5) * width
-        drift = math.sin(t * (0.22 + i * 0.002) + seed) * width * (0.018 if layer == "far" else 0.030 if layer == "mid" else 0.055)
-        x = x_base + drift
-        y = height + base_size * 7 - progress * (height + base_size * 14)
-        angle = seed * 0.08 + t * (0.22 + i * 0.002)
+        drift = math.sin(t * (0.22 + i * 0.002) + seed) * width * drift_scale
+        # beat expands petals outward from center for visible background scaling
+        expand = beat * width * (0.012 if layer == "far" else 0.024 if layer == "mid" else 0.045)
+        side = -1 if x_base < width / 2 else 1
+        x = x_base + drift + side * expand
+        y = height + base_size * 7 - progress * (height + base_size * 14) - beat * height * (0.010 if layer == "far" else 0.022 if layer == "mid" else 0.040)
+        angle = seed * 0.08 + t * (0.22 + i * 0.002) + beat * 0.20
         size_factor = 0.72 + 0.42 * (math.sin(seed * 0.07) * 0.5 + 0.5)
-        petal_size = base_size * size_factor
-        alpha = int(alpha_base * (0.45 + 0.55 * math.sin(progress * math.pi)))
-        _draw_realistic_petal(draw, x, y, petal_size, angle, alpha, tone=i % 2)
+        petal_size = base_size * size_factor * (1.0 + beat * (0.10 if layer == "far" else 0.18 if layer == "mid" else 0.26))
+        alpha = int(alpha_base * (0.48 + 0.52 * math.sin(progress * math.pi)) * (1.0 + beat * 0.20))
+        _draw_realistic_petal(draw, x, y, petal_size, angle, min(alpha, 220), tone=i % 2)
 
     if blur > 0:
         overlay = overlay.filter(ImageFilter.GaussianBlur(radius=blur))
@@ -166,43 +183,49 @@ def _speed_line_overlay(size: tuple[int, int], t: float, beats: list[float]) -> 
     boost = _beat_strength(t, beats, duration=0.16)
     if boost <= 0.01:
         return overlay
-    for i in range(30):
-        angle = (i / 30) * math.tau + 0.03 * math.sin(t)
-        inner = min(width, height) * 0.18
-        outer = max(width, height) * (0.44 + 0.12 * ((i % 5) / 5))
+    for i in range(38):
+        angle = (i / 38) * math.tau + 0.03 * math.sin(t)
+        inner = min(width, height) * (0.16 + 0.03 * boost)
+        outer = max(width, height) * (0.48 + 0.18 * ((i % 5) / 5) + 0.08 * boost)
         x1 = cx + math.cos(angle) * inner
         y1 = cy + math.sin(angle) * inner * 0.58
         x2 = cx + math.cos(angle) * outer
         y2 = cy + math.sin(angle) * outer * 0.65
-        alpha = int((14 + (i % 4) * 5) * boost)
-        draw.line((x1, y1, x2, y2), fill=(255, 225, 245, min(alpha, 68)), width=1)
-    return overlay.filter(ImageFilter.GaussianBlur(radius=0.6))
+        alpha = int((18 + (i % 4) * 6) * boost)
+        draw.line((x1, y1, x2, y2), fill=(255, 225, 245, min(alpha, 86)), width=1)
+    return overlay.filter(ImageFilter.GaussianBlur(radius=0.55))
 
 
 def _background_effects(size: tuple[int, int], t: float, beats: list[float]) -> Image.Image:
     width, height = size
+    beat = _beat_strength(t, beats, duration=0.20)
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     glow = Image.new("RGBA", size, (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     cx, cy = width // 2, height // 2
-    boost = _beat_strength(t, beats, duration=0.20)
     for i in range(7):
-        rx = int(width * (0.18 + i * 0.050 + boost * 0.010))
-        ry = int(height * (0.24 + i * 0.060 + boost * 0.014))
-        alpha = max(0, 14 - i * 2) + int(6 * boost)
+        rx = int(width * (0.18 + i * 0.050 + beat * 0.025))
+        ry = int(height * (0.24 + i * 0.060 + beat * 0.030))
+        alpha = max(0, 16 - i * 2) + int(13 * beat)
         gd.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=(150, 42, 118, alpha))
     overlay.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=26)))
     overlay.alpha_composite(_speed_line_overlay(size, t, beats))
-    overlay.alpha_composite(_petal_layer(size, t, "far"))
-    overlay.alpha_composite(_petal_layer(size, t, "mid"))
+    overlay.alpha_composite(_petal_layer(size, t, "far", beat))
+    overlay.alpha_composite(_petal_layer(size, t, "mid", beat))
+    # Zoom the entire background FX layer on beat so petals visibly scale with the music.
+    overlay = _zoom_rgba_layer(overlay, 1.0 + 0.055 * beat)
     flash = flash_opacity(t, beats, duration=0.10)
     if flash > 0:
-        overlay.alpha_composite(Image.new("RGBA", size, (255, 220, 245, int(52 * flash))))
+        overlay.alpha_composite(Image.new("RGBA", size, (255, 220, 245, int(58 * flash))))
     return overlay
 
 
-def _foreground_petal_effects(size: tuple[int, int], t: float) -> Image.Image:
-    return _petal_layer(size, t, "near")
+def _foreground_petal_effects(size: tuple[int, int], t: float, beats: list[float]) -> Image.Image:
+    beat = _beat_strength(t, beats, duration=0.18)
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    layer.alpha_composite(_petal_layer(size, t, "near", beat))
+    layer.alpha_composite(_petal_layer(size, t, "front", beat))
+    return _zoom_rgba_layer(layer, 1.0 + 0.035 * beat)
 
 
 def _paste_with_shadow(base: Image.Image, character: Image.Image, x: int, y: int, strength: int = 105) -> None:
@@ -248,9 +271,9 @@ def make_animated_main_visual(
     """Horizontal cinematic visual layer.
 
     - black cinematic base
-    - slow rising petals with far/mid/near depth
-    - near petals are intentionally blurred
-    - background scales on beat
+    - slow rising petals with far/mid/near/front depth
+    - near/front petals are intentionally blurred
+    - background and petals scale on beat
     - character slows briefly and jumps on every beat
     """
     width, height = size
@@ -261,7 +284,7 @@ def make_animated_main_visual(
 
     def make_frame(t: float) -> np.ndarray:
         beat = _beat_strength(t, beats, duration=0.20)
-        bg_zoom = 1.0 + 0.035 * beat
+        bg_zoom = 1.0 + 0.070 * beat
         if background_path and Path(background_path).exists() and Path(background_path).suffix.lower() not in VIDEO_SUFFIXES:
             bg = _pil_cover_image(background_path, size, zoom=bg_zoom).convert("RGBA")
             bg = Image.blend(Image.new("RGBA", size, (0, 0, 0, 255)), bg, 0.30)
@@ -287,7 +310,7 @@ def make_animated_main_visual(
         y = int(height * 0.54 - target_h / 2 + jump)
         _paste_with_shadow(frame, char, x, y, strength=105)
 
-        frame.alpha_composite(_foreground_petal_effects(size, t))
+        frame.alpha_composite(_foreground_petal_effects(size, t, beats))
         return np.array(frame.convert("RGB"))
 
     return VideoClip(make_frame=make_frame, duration=duration)
