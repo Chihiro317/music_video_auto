@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip, ImageClip, VideoFileClip
+from PIL import Image
 
 from .beat_detect import detect_beats, get_audio_duration
 from .effects import flash_opacity, shake_offset
@@ -27,6 +29,36 @@ class RenderConfig:
     outro_seconds: float = 2.0
 
 
+def _resample_filter():
+    if hasattr(Image, "Resampling"):
+        return Image.Resampling.LANCZOS
+    return Image.LANCZOS if hasattr(Image, "LANCZOS") else Image.BICUBIC
+
+
+def _pil_cover_image(path: str | Path, size: tuple[int, int]) -> Image.Image:
+    """Resize and center-crop an image to cover target size with PIL."""
+    width, height = size
+    image = Image.open(path).convert("RGB")
+    src_w, src_h = image.size
+    scale = max(width / src_w, height / src_h)
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    image = image.resize((new_w, new_h), _resample_filter())
+    left = max(0, (new_w - width) // 2)
+    top = max(0, (new_h - height) // 2)
+    return image.crop((left, top, left + width, top + height))
+
+
+def _pil_character_image(path: str | Path, target_height: int) -> Image.Image:
+    """Resize a character image by height with PIL while preserving alpha."""
+    image = Image.open(path).convert("RGBA")
+    src_w, src_h = image.size
+    scale = target_height / src_h
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    return image.resize((new_w, new_h), _resample_filter())
+
+
 def _make_background(path: str | None, duration: float, size: tuple[int, int]):
     width, height = size
     if not path:
@@ -37,6 +69,7 @@ def _make_background(path: str | None, duration: float, size: tuple[int, int]):
         raise FileNotFoundError(f"背景素材不存在：{bg_path}")
 
     if bg_path.suffix.lower() in {".mp4", ".mov", ".mkv", ".avi", ".webm"}:
+        # Video backgrounds still use MoviePy resize/crop. Image backgrounds avoid MoviePy resize for CI stability.
         clip = VideoFileClip(str(bg_path)).without_audio()
         if clip.duration < duration:
             clip = clip.loop(duration=duration)
@@ -45,8 +78,8 @@ def _make_background(path: str | None, duration: float, size: tuple[int, int]):
         clip = clip.resize(height=height)
         return clip.crop(x_center=clip.w / 2, y_center=clip.h / 2, width=width, height=height)
 
-    clip = ImageClip(str(bg_path)).set_duration(duration).resize(height=height)
-    return clip.crop(x_center=clip.w / 2, y_center=clip.h / 2, width=width, height=height)
+    bg_image = _pil_cover_image(bg_path, size)
+    return ImageClip(np.array(bg_image)).set_duration(duration)
 
 
 def _safe_text_clip(text: str, fontsize: int, max_width: int, stroke_width: int = 2, align: str = "center"):
@@ -74,16 +107,15 @@ def render_video(config: RenderConfig) -> Path:
     audio = AudioFileClip(config.music)
     background = _make_background(config.background, total_duration, size)
 
-    character = ImageClip(config.character).set_duration(duration)
     max_character_height = int(config.height * 0.58)
-    character = character.resize(height=max_character_height)
+    character_image = _pil_character_image(config.character, target_height=max_character_height)
+    character = ImageClip(np.array(character_image)).set_duration(duration)
 
     def char_position(t: float):
         x_shake, y_shake = shake_offset(t, beats)
         return ("center", int(config.height * 0.43 - character.h / 2 + y_shake))
 
-    # MoviePy 1.0.3 does not reliably support ImageClip.resize(callable) in CI.
-    # Keep beat-driven position shake here; stable beat-driven scale will be added via a custom frame function later.
+    # Keep beat-driven position shake. Stable beat-driven scale will be added via a custom frame function later.
     character = character.set_position(char_position)
 
     title_text = f"{config.title} {config.version}".strip()
