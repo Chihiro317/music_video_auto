@@ -6,7 +6,7 @@ from pathlib import Path
 from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip, ImageClip, VideoFileClip
 
 from .beat_detect import detect_beats, get_audio_duration
-from .effects import beat_scale, flash_opacity, shake_offset
+from .effects import flash_opacity, shake_offset
 from .subtitle import load_srt
 from .text_utils import make_text_clip
 
@@ -82,10 +82,9 @@ def render_video(config: RenderConfig) -> Path:
         x_shake, y_shake = shake_offset(t, beats)
         return ("center", int(config.height * 0.43 - character.h / 2 + y_shake))
 
-    def char_resize(t: float):
-        return beat_scale(t, beats, base=1.0, pulse=0.11)
-
-    character = character.resize(char_resize).set_position(char_position)
+    # MoviePy 1.0.3 does not reliably support ImageClip.resize(callable) in CI.
+    # Keep beat-driven position shake here; stable beat-driven scale will be added via a custom frame function later.
+    character = character.set_position(char_position)
 
     title_text = f"{config.title} {config.version}".strip()
     title_clip = _safe_text_clip(title_text, fontsize=max(24, int(config.height * 0.022)), max_width=int(config.width * 0.82), stroke_width=3, align="left")
