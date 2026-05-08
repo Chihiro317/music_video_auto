@@ -50,10 +50,12 @@ jobs:
         run: |
           pytest -q
 
-      - name: Upload rendered test video
+      - name: Upload rendered test videos
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: minimal-3s-render-video
-          path: output/test_artifacts/minimal_3s_render.mp4
+          name: rendered-test-videos
+          path: |
+            output/test_artifacts/minimal_3s_render.mp4
+            output/test_artifacts/full_renderer_3s_render.mp4
           if-no-files-found: warn
