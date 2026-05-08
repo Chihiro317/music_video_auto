@@ -8,7 +8,6 @@ from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip, ImageCl
 from PIL import Image
 
 from .beat_detect import detect_beats, get_audio_duration
-from .effects import flash_opacity, shake_offset
 from .subtitle import load_srt
 from .text_utils import make_text_clip
 
@@ -69,7 +68,7 @@ def _make_background(path: str | None, duration: float, size: tuple[int, int]):
         raise FileNotFoundError(f"背景素材不存在：{bg_path}")
 
     if bg_path.suffix.lower() in {".mp4", ".mov", ".mkv", ".avi", ".webm"}:
-        # Video backgrounds still use MoviePy resize/crop. Image backgrounds avoid MoviePy resize for CI stability.
+        # Kept for user-supplied video backgrounds. The CI smoke test uses image backgrounds.
         clip = VideoFileClip(str(bg_path)).without_audio()
         if clip.duration < duration:
             clip = clip.loop(duration=duration)
@@ -93,6 +92,25 @@ def _safe_text_clip(text: str, fontsize: int, max_width: int, stroke_width: int 
     )
 
 
+def _make_flash_clips(size: tuple[int, int], beats: list[float], duration: float) -> list[ColorClip]:
+    """Create fixed flash clips without callable opacity.
+
+    MoviePy 1.0.3 is unstable in CI when callables are passed into set_opacity
+    or set_position. This helper uses only fixed start/duration/opacity values.
+    """
+    clips: list[ColorClip] = []
+    for beat in beats[:20]:
+        if 0 <= beat < duration:
+            clips.append(
+                ColorClip(size, color=(255, 255, 255))
+                .set_start(float(beat))
+                .set_duration(0.06)
+                .set_opacity(0.22)
+                .set_position((0, 0))
+            )
+    return clips
+
+
 def render_video(config: RenderConfig) -> Path:
     """Render a music video according to config."""
     output = Path(config.output)
@@ -111,12 +129,9 @@ def render_video(config: RenderConfig) -> Path:
     character_image = _pil_character_image(config.character, target_height=max_character_height)
     character = ImageClip(np.array(character_image)).set_duration(duration)
 
-    def char_position(t: float):
-        x_shake, y_shake = shake_offset(t, beats)
-        return ("center", int(config.height * 0.43 - character.h / 2 + y_shake))
-
-    # Keep beat-driven position shake. Stable beat-driven scale will be added via a custom frame function later.
-    character = character.set_position(char_position)
+    character_x = "center"
+    character_y = int(config.height * 0.43 - character.h / 2)
+    character = character.set_position((character_x, character_y))
 
     title_text = f"{config.title} {config.version}".strip()
     title_clip = _safe_text_clip(title_text, fontsize=max(24, int(config.height * 0.022)), max_width=int(config.width * 0.82), stroke_width=3, align="left")
@@ -128,8 +143,7 @@ def render_video(config: RenderConfig) -> Path:
         txt = txt.set_start(sub.start).set_end(min(sub.end, duration)).set_position(("center", int(config.height * 0.78)))
         subtitle_clips.append(txt)
 
-    flash = ColorClip(size, color=(255, 255, 255)).set_duration(duration)
-    flash = flash.set_opacity(lambda t: flash_opacity(t, beats)).set_position((0, 0))
+    flash_clips = _make_flash_clips(size=size, beats=beats, duration=duration)
 
     outro_bg = ColorClip(size, color=(10, 10, 18)).set_start(duration).set_duration(config.outro_seconds)
     outro_title = _safe_text_clip("来抖音 发现更多创作者", fontsize=max(32, int(config.height * 0.03)), max_width=int(config.width * 0.9), stroke_width=2)
@@ -139,7 +153,7 @@ def render_video(config: RenderConfig) -> Path:
     outro_search = outro_search.set_start(duration).set_duration(config.outro_seconds).set_position(("center", int(config.height * 0.48)))
 
     composite = CompositeVideoClip(
-        [background, character, title_clip, *subtitle_clips, flash, outro_bg, outro_title, outro_search],
+        [background, character, title_clip, *subtitle_clips, *flash_clips, outro_bg, outro_title, outro_search],
         size=size,
     ).set_duration(total_duration)
     composite = composite.set_audio(audio.set_duration(duration))
